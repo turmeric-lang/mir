@@ -2,10 +2,10 @@
    __APPLE__, so on Linux aarch64 glibc's <sys/user.h> -- which <ucontext.h>
    reaches through <sys/procfs.h> -- failed to parse at
    `__uint128_t vregs[32];` ("syntax error on struct (expected
-   '<declarator>')"), and so did every program including <ucontext.h>.  The
-   stand-in must keep AAPCS64's size and alignment there too, so glibc's
-   struct user_fpsimd_struct matches the platform compiler's layout.
-   Elsewhere this test has nothing to check. */
+   '<declarator>')"), and so did every program including <ucontext.h>.
+   __uint128_t is a real integer type now (int128-ops.c), and it must keep
+   AAPCS64's size and alignment, so glibc's struct user_fpsimd_struct matches
+   the platform compiler's layout.  Elsewhere this test has nothing to check. */
 #if defined(__aarch64__) && defined(__linux__)
 #include <ucontext.h>
 #include <sys/user.h>
