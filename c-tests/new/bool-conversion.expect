@@ -1,0 +1,10 @@
+init 1 1 1 1 1 0 1 1 1 1 0 0
+cast 1 1 1 1 0
+assign 1 1 0
+compound 1 1 1
+incdec 1 1 0 1
+call 1 0 1 1 1 1
+member 1 1 1
+array 1 1 0
+static 1 1 1 1 1 0 1 1 1
+folded 1 1 1 0
