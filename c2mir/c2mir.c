@@ -6697,19 +6697,6 @@ static c128_t c128_divmod (c128_t a, c128_t b, int div_p, int signed_p) {
   return neg_a ? c128_neg (r) : r;
 }
 
-/* 2^N as a long double.  Built at run time on purpose, so that this file has
-   no non-zero long double literal: c2mir compiles itself in the bootstrap
-   tests, and MIR's generator miscompiles the long double type pun in
-   put_ldouble (mir.c), so the self-compiled c2mir writes every such constant
-   into binary MIR as 0.  Even the 1 is converted from an int at run time.  */
-static mir_ldouble ld_pow2 (int n) {
-  int one = 1;
-  mir_ldouble r = one;
-
-  for (; n > 0; n--) r += r;
-  return r;
-}
-
 /* The truth value of constant E.  */
 static int const_true_p (struct expr *e) {
   if (floating_type_p (e->type)) return e->c.d_val != 0.0;
@@ -6727,7 +6714,7 @@ static mir_ldouble c128_to_float (c128_t a, int signed_p, enum basic_type to) {
   if (neg) a = c128_neg (a);
   if (to == TP_LDOUBLE && sizeof (mir_ldouble) > sizeof (double)) {
     /* both halves are exact in a long double wider than double */
-    r = (mir_ldouble) a.hi * ld_pow2 (64) + (mir_ldouble) a.lo;
+    r = (mir_ldouble) a.hi * 18446744073709551616.0L + (mir_ldouble) a.lo;
   } else {
     for (; a.hi != 0; n++) { /* shift into 64 bits, keeping a sticky bit */
       st |= a.lo & 1;
@@ -6736,7 +6723,7 @@ static mir_ldouble c128_to_float (c128_t a, int signed_p, enum basic_type to) {
     }
     a.lo |= st;
     r = to == TP_FLOAT ? (mir_ldouble) (float) a.lo : (mir_ldouble) (double) a.lo;
-    r *= ld_pow2 (n);
+    for (; n > 0; n--) r *= 2;
   }
   return neg ? -r : r;
 }
@@ -6746,8 +6733,8 @@ static c128_t c128_from_float (mir_ldouble d) {
   mir_ldouble m = d < 0 ? -d : d;
   c128_t r;
 
-  r.hi = (mir_ullong) (m / ld_pow2 (64));
-  r.lo = (mir_ullong) (m - (mir_ldouble) r.hi * ld_pow2 (64));
+  r.hi = (mir_ullong) (m / 18446744073709551616.0L);
+  r.lo = (mir_ullong) (m - (mir_ldouble) r.hi * 18446744073709551616.0L);
   return d < 0 ? c128_neg (r) : r;
 }
 
@@ -11847,7 +11834,7 @@ static void i128_float_to_u64 (c2m_ctx_t c2m_ctx, MIR_op_t dst, MIR_op_t y, MIR_
   MIR_context_t ctx = c2m_ctx->ctx;
   MIR_label_t big = MIR_new_label (ctx), done = MIR_new_label (ctx);
   MIR_op_t two63 = (t == MIR_T_D ? MIR_new_double_op (ctx, 9223372036854775808.0)
-                                 : MIR_new_ldouble_op (ctx, ld_pow2 (63)));
+                                 : MIR_new_ldouble_op (ctx, 9223372036854775808.0L));
   MIR_op_t z = get_new_temp (c2m_ctx, t).mir_op;
 
   i128_emit3 (c2m_ctx, t == MIR_T_D ? MIR_DBGE : MIR_LDBGE, i128_label_op (c2m_ctx, big), y, two63);
@@ -11876,7 +11863,7 @@ static op_t i128_from_float (c2m_ctx_t c2m_ctx, op_t op, MIR_type_t t, int signe
   x = get_new_temp (c2m_ctx, t).mir_op;
   h = get_new_temp (c2m_ctx, t).mir_op;
   two64 = (t == MIR_T_D ? MIR_new_double_op (ctx, 18446744073709551616.0)
-                        : MIR_new_ldouble_op (ctx, ld_pow2 (64)));
+                        : MIR_new_ldouble_op (ctx, 18446744073709551616.0L));
   i128_emit2 (c2m_ctx, tp_mov (t), x, op.mir_op);
   i128_emit2 (c2m_ctx, MIR_MOV, s, i128_int (c2m_ctx, 0));
   if (signed_p) { /* convert |x| and negate the result when x < 0 */
@@ -11894,7 +11881,7 @@ static op_t i128_from_float (c2m_ctx_t c2m_ctx, op_t op, MIR_type_t t, int signe
      has no more significant bits than x.  */
   i128_emit3 (c2m_ctx, t == MIR_T_D ? MIR_DMUL : MIR_LDMUL, h, x,
               t == MIR_T_D ? MIR_new_double_op (ctx, 1.0 / 18446744073709551616.0)
-                           : MIR_new_ldouble_op (ctx, ld_pow2 (0) / ld_pow2 (64)));
+                           : MIR_new_ldouble_op (ctx, 1.0L / 18446744073709551616.0L));
   i128_float_to_u64 (c2m_ctx, i128_hi (c2m_ctx, res), h, t);
   i128_emit2 (c2m_ctx, t == MIR_T_D ? MIR_UI2D : MIR_UI2LD, h, i128_hi (c2m_ctx, res));
   i128_emit3 (c2m_ctx, t == MIR_T_D ? MIR_DMUL : MIR_LDMUL, h, h, two64);
@@ -11921,7 +11908,7 @@ static MIR_op_t i128_u_to_float (c2m_ctx_t c2m_ctx, op_t a, MIR_type_t t) {
     MIR_op_t h = get_new_temp (c2m_ctx, t).mir_op;
 
     i128_emit2 (c2m_ctx, MIR_UI2LD, h, i128_hi (c2m_ctx, a));
-    i128_emit3 (c2m_ctx, MIR_LDMUL, h, h, MIR_new_ldouble_op (ctx, ld_pow2 (64)));
+    i128_emit3 (c2m_ctx, MIR_LDMUL, h, h, MIR_new_ldouble_op (ctx, 18446744073709551616.0L));
     i128_emit2 (c2m_ctx, MIR_UI2LD, res, i128_lo (a));
     i128_emit3 (c2m_ctx, MIR_LDADD, res, res, h);
     return res;
@@ -14005,13 +13992,29 @@ static op_t gen (c2m_ctx_t c2m_ctx, node_t r, MIR_label_t true_label, MIR_label_
   }
   case N_IND: {
     MIR_type_t ind_t;
+    MIR_alias_t alias;
     node_t arr = NL_HEAD (r->u.ops);
     struct type *el_type = ((struct expr *) r->attr)->type;
     struct type *arr_type = ((struct expr *) arr->attr)->type;
     mir_size_t size = type_size (c2m_ctx, el_type);
 
     t = get_mir_type (c2m_ctx, el_type);
-    op1 = val_gen (c2m_ctx, arr);
+    alias = get_type_alias (c2m_ctx, el_type);
+    if (arr_type->mode == TM_PTR && arr_type->arr_type != NULL) { /* an array object */
+      /* An element of an array that lives in a union keeps the union's alias,
+         as a scalar member does (N_FIELD): `u.ld = x; ... u.words[0]` reads
+         back what was stored.  With the element type's own alias the two
+         accesses looked independent to the generator, which then read the
+         words from before the store -- 0 for every long double that
+         put_ldouble wrote.  */
+      op1 = gen (c2m_ctx, arr, NULL, NULL, FALSE, NULL, NULL);
+      if (op1.mir_op.mode == MIR_OP_MEM && op1.mir_op.u.mem.alias != 0
+          && MIR_alias_name (ctx, op1.mir_op.u.mem.alias)[0] == 'U')
+        alias = op1.mir_op.u.mem.alias;
+      op1 = force_val (c2m_ctx, op1, TRUE);
+    } else {
+      op1 = val_gen (c2m_ctx, arr);
+    }
     op2 = val_gen (c2m_ctx, NL_EL (r->u.ops, 1));
     ind_t = get_mir_type (c2m_ctx, ((struct expr *) NL_EL (r->u.ops, 1)->attr)->type);
     if (int128_type_p (((struct expr *) NL_EL (r->u.ops, 1)->attr)->type)) {
@@ -14040,8 +14043,8 @@ static op_t gen (c2m_ctx_t c2m_ctx, node_t r, MIR_label_t true_label, MIR_label_
     res = op1;
     res.decl = NULL;
     if (res.mir_op.mode == MIR_OP_REG)
-      res.mir_op = MIR_new_alias_mem_op (ctx, t, 0, res.mir_op.u.reg, 0, 1,
-                                         get_type_alias (c2m_ctx, el_type), arr_type->antialias);
+      res.mir_op
+        = MIR_new_alias_mem_op (ctx, t, 0, res.mir_op.u.reg, 0, 1, alias, arr_type->antialias);
     if (res.mir_op.u.mem.base == 0 && size == 1) {
       res.mir_op.u.mem.base = op2.mir_op.u.reg;
     } else if (res.mir_op.u.mem.index == 0 && size <= MIR_MAX_SCALE) {
