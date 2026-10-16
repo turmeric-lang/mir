@@ -55,9 +55,16 @@ jobs:
       if: runner.os != 'Windows'
       # A failing c-test or bootstrap fails the step (it used to print FAIL and
       # pass); -k runs the rest anyway, so one log shows every failure.
+      # shell: bash adds pipefail, so make's status survives the tee.
+      shell: bash
       run: |
         uname -a
-        make -k test
+        make -k test 2>&1 | tee make-test.log
+    # The log runs to tens of thousands of lines; repeat just the failures at
+    # the end, where they can be read without scrolling or the whole log.
+    - name: List failures
+      if: failure() && runner.os != 'Windows'
+      run: tr '\r' '\n' < make-test.log | grep -aE 'FAIL|mismatch|\*\*\*' || true
     - name: cmake test
       if: runner.os == 'Windows'
       run: |
