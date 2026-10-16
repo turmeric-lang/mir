@@ -120,6 +120,13 @@ else
 endif
 
 C2M_BOOTSTRAP_FLAGS = -DMIR_BOOTSTRAP
+# The c2m that compiles stage 1 was built with this define (CFLAGS above), so
+# it reads system headers from the xcrun SDK.  Without it, the stage-1 c2mir
+# falls back to the Command Line Tools SDK, stage 2 parses different headers
+# and the bootstrap .bmir files differ on every macOS run.
+ifneq ($(ADDITIONAL_INCLUDE_PATH),)
+  C2M_BOOTSTRAP_FLAGS += -DADDITIONAL_INCLUDE_PATH=\"$(ADDITIONAL_INCLUDE_PATH)\"
+endif
 C2M_BOOTSTRAP_FLAGS0 := $(C2M_BOOTSTRAP_FLAGS)
 ifeq ($(shell sh $(SRC_DIR)/check-threads.sh), ok)
   ifneq ($(CC),cl)
