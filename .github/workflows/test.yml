@@ -1,0 +1,64 @@
+name: test
+
+# The fork's one test workflow.  It replaces the six per-push workflows
+# inherited from upstream (AMD64-Linux-OSX-Windows-test, apple-aarch64-test,
+# aarch64-test, ppc64le-test, riscv64-test, s390x-test), which cost far more
+# than they told us:
+#
+#   - aarch64/ppc64le/riscv64/s390x ask for upstream's self-hosted machines
+#     (the GCC compile farm, ton9).  No runner here carries those labels, so
+#     every push left four jobs queued for GitHub's 24-hour limit and then
+#     cancelled -- not one of them ever ran on this fork.
+#   - apple-aarch64-test (macos-14) and the macos-latest leg were both Apple
+#     Silicon running the same `make test`: two macOS jobs per push, out of
+#     the org-wide macOS concurrency that turmeric's own CI shares.
+#   - `on: push` ran everything for every push to every branch, and again for
+#     the merge commit on master.
+#
+# Now: one run per pull request (re-pushes cancel the superseded run), one
+# leg per platform turmeric ships its JIT on, and a weekly run on master to
+# catch runner-image drift (a new macOS SDK header c2mir cannot parse).
+# Pushing a branch with no PR runs nothing; to test one, use "Run workflow"
+# (workflow_dispatch) on it.  After a direct push to master, run it by hand.
+#
+# When merging upstream: it still has the six old files.  A modify/delete
+# conflict on one of them is resolved by keeping it deleted and porting any
+# change that matters into this file.
+
+on:
+  pull_request:
+  schedule:
+    # Weekly, Monday 06:17 UTC.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # linux-x86_64, linux-aarch64, macos-arm64, windows-x86_64: the
+        # targets turmeric's release builds the MIR JIT for.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Measured 1-5 min per leg.  Without a limit a hang holds the runner for
+    # GitHub's 360-minute default.
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: make test
+      if: runner.os != 'Windows'
+      run: |
+        uname -a
+        make test
+    - name: cmake test
+      if: runner.os == 'Windows'
+      run: |
+        cmake -A x64 -DBUILD_TESTING=ON
+        cmake --build . --config Release
+        ctest --verbose --output-on-failure
