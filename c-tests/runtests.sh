@@ -7,6 +7,7 @@ stderrf=__c-tests-temp.stderr
 errf=__c-tests-temp.err
 all=0
 ok=0
+failed=
 ctest_dir=`dirname $0`
 execution_program=$1
 compiler=$2
@@ -67,6 +68,7 @@ runtest () {
 	    if test x$expect_out != x && ! diff $DIFF_STRIP_CR -up $expect_out $outf >$errf;then
 	            $ECHO Output mismatch
 		    cat $errf
+		    failed="$failed $t"
             else
 		    ok=`expr $ok + 1`
 	            $ECHO -ne "OK               \r"
@@ -74,6 +76,7 @@ runtest () {
 	    if test x$stderr_expect_out != x && ! diff $DIFF_STRIP_CR -up $stderr_expect_out $stderrf >$errf;then
 	            $ECHO Stderr mismatch
 		    cat $errf
+		    failed="$failed $t"
             else
 		    ok=`expr $ok + 1`
 	            $ECHO -ne "OK               \r"
@@ -81,9 +84,11 @@ runtest () {
 	elif test $expect_code = 0; then
 	        cat $stderrf
 	        $ECHO FAIL "(code = $code)"
+		failed="$failed $t"
 	else
 	        cat $stderrf
-		$ECHO $FAIL "(code = $code, expected code = $expect_code)"
+		$ECHO FAIL "(code = $code, expected code = $expect_code)"
+		failed="$failed $t"
 	fi
 }
 
@@ -116,3 +121,8 @@ done
 
 $ECHO Tests $all, Success tests $ok
 rm -f $outf $stderrf $errf
+# Exit non-zero on any failure, so make (and CI) stop treating it as a pass.
+if test "x$failed" != x; then
+    $ECHO FAILED:$failed
+    exit 1
+fi

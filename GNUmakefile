@@ -636,7 +636,7 @@ c2mir-bootstrap-test0: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS) -O0 $(BUILD_DIR)/1o0.bmir -el -w $(C2M_BOOTSTRAP_FLAGS) -O0\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			    $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2o0.bmir
-	$(Q) cmp  $(BUILD_DIR)/1o0.bmir $(BUILD_DIR)/2o0.bmir && echo Passed || echo FAIL
+	$(Q) cmp  $(BUILD_DIR)/1o0.bmir $(BUILD_DIR)/2o0.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1o0.bmir $(BUILD_DIR)/2o0.bmir
 
 c2mir-bootstrap-test1: $(BUILD_DIR)/c2m$(EXE)
@@ -646,7 +646,7 @@ c2mir-bootstrap-test1: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS) -O1 $(BUILD_DIR)/1o1.bmir -el -w $(C2M_BOOTSTRAP_FLAGS) -O1\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			    $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2o1.bmir
-	$(Q) cmp $(BUILD_DIR)/1o1.bmir $(BUILD_DIR)/2o1.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/1o1.bmir $(BUILD_DIR)/2o1.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1o1.bmir $(BUILD_DIR)/2o1.bmir
 
 c2mir-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
@@ -656,7 +656,7 @@ c2mir-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS) $(BUILD_DIR)/1o2.bmir -el -w $(C2M_BOOTSTRAP_FLAGS)\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			     $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2o2.bmir
-	$(Q) cmp $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir
 
 c2mir-bb-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
@@ -666,7 +666,7 @@ c2mir-bb-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS) $(BUILD_DIR)/1o2.bmir -p4 -eb -w $(C2M_BOOTSTRAP_FLAGS)\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			     $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2o2.bmir
-	$(Q) cmp $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1o2.bmir $(BUILD_DIR)/2o2.bmir
 
 c2mir-bootstrap-test3: $(BUILD_DIR)/c2m$(EXE)
@@ -676,7 +676,7 @@ c2mir-bootstrap-test3: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS) -O3 $(BUILD_DIR)/1o3.bmir -el -w $(C2M_BOOTSTRAP_FLAGS) -O3\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			    $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2o3.bmir
-	$(Q) cmp $(BUILD_DIR)/1o3.bmir $(BUILD_DIR)/2o3.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/1o3.bmir $(BUILD_DIR)/2o3.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1o3.bmir $(BUILD_DIR)/2o3.bmir
 
 c2mir-parallel-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
@@ -686,7 +686,7 @@ c2mir-parallel-bootstrap-test: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) -p4 $(C2M_BOOTSTRAP_FLAGS) $(BUILD_DIR)/1p2.bmir -eg -w -p4 $(C2M_BOOTSTRAP_FLAGS)\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			    $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/2p2.bmir
-	$(Q) cmp $(BUILD_DIR)/1p2.bmir $(BUILD_DIR)/2p2.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/1p2.bmir $(BUILD_DIR)/2p2.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/1p2.bmir $(BUILD_DIR)/2p2.bmir
 
 c2mir-bootstrap-test4: $(BUILD_DIR)/c2m$(EXE) $(BUILD_DIR)/b2ctab$(EXE)
@@ -699,7 +699,7 @@ c2mir-bootstrap-test4: $(BUILD_DIR)/c2m$(EXE) $(BUILD_DIR)/b2ctab$(EXE)
 	$(Q) $(BUILD_DIR)/c2m-test$(EXE) $(C2M_BOOTSTRAP_FLAGS) -w -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c\
 	                         $(SRC_DIR)/c2mir/c2mir.c $(SRC_DIR)/c2mir/c2mir-driver.c\
 				 $(SRC_DIR)/mir.c -o $(BUILD_DIR)/t2.bmir
-	$(Q) cmp $(BUILD_DIR)/t1.bmir $(BUILD_DIR)/t2.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/t1.bmir $(BUILD_DIR)/t2.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/t1.bmir $(BUILD_DIR)/t2.bmir $(BUILD_DIR)/mir-ctab $(BUILD_DIR)/c2m-test$(EXE)
 
 c2mir-bootstrap-test5: $(BUILD_DIR)/c2m$(EXE)
@@ -710,7 +710,7 @@ c2mir-bootstrap-test5: $(BUILD_DIR)/c2m$(EXE)
 	$(Q) $(BUILD_DIR)/c2m$(EXE) $(C2M_BOOTSTRAP_FLAGS0) $(BUILD_DIR)/i1.bmir -ei -w $(C2M_BOOTSTRAP_FLAGS0)\
 	                    -I$(SRC_DIR) $(SRC_DIR)/mir-gen.c $(SRC_DIR)/c2mir/c2mir.c\
 			    $(SRC_DIR)/c2mir/c2mir-driver.c $(SRC_DIR)/mir.c -o $(BUILD_DIR)/i2.bmir
-	$(Q) cmp $(BUILD_DIR)/i1.bmir $(BUILD_DIR)/i2.bmir && echo Passed || echo FAIL
+	$(Q) cmp $(BUILD_DIR)/i1.bmir $(BUILD_DIR)/i2.bmir && echo Passed || { echo FAIL; exit 1; }
 	$(Q) rm -rf $(BUILD_DIR)/i1.bmir $(BUILD_DIR)/i2.bmir
 
 # ------------------ l2m tests --------------------------
