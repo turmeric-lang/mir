@@ -1,9 +1,9 @@
 /* __attribute__ ((musttail)) return f (...): c2mir makes the call a MIR tail
    call (MIR_TCALL).  The generator turns the ones whose args and results are
-   all in registers into jumps and the rest back into a call and a return; the
-   interpreter runs every one as a call and a return.  This checks the results
-   of both kinds at a depth any stack takes -- musttail-deep.c checks the
-   jumps. */
+   all in registers into jumps, the interpreter runs a callee it interprets in
+   the caller's activation, and both make the rest a call and a return.  This
+   checks the results of both kinds at a depth any stack takes --
+   musttail-deep.c checks the constant stack. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
