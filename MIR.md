@@ -514,8 +514,14 @@
     runs in constant stack.  On x86-64 and aarch64 that is every `MIR_TCALL` whose
     prototype is not vararg and whose arguments and results are all passed in registers
     (no block or long double ones)
-  * Any other `MIR_TCALL`, every one on the other targets, and every one the
-    interpreter executes is a call followed by a return
+  * The interpreter runs the called function in the current function's activation -- also
+    in constant stack -- when it is a MIR function without machine code that the call
+    names directly or reaches through the thunk of a function given the interpreter
+    interface, and its prototype is not vararg and it takes no block args (on wasm, where
+    the interpreter can not reset the stack pointer, such a tail call made by a function
+    that did an alloca leaves its allocas and a frame until the activation returns, as
+    `MIR_BSTART`/`MIR_BEND` blocks leave theirs)
+  * Any other `MIR_TCALL`, and every one on the other targets, is a call followed by a return
   * A tail call is never inlined, and a function containing one is never inlined either
   * c2mir generates it for `__attribute__ ((musttail)) return f (...);` when the call's
     results are exactly what the function returns (macro `__MIRC_MUSTTAIL__` is defined);

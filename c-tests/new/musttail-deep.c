@@ -1,6 +1,7 @@
-/* __attribute__ ((musttail)) return f (...) as jumps: cycles far deeper than
-   any stack holds as calls.  Only for the generator (see musttail-deep.c.opt):
-   the interpreter runs a tail call as a call. */
+/* __attribute__ ((musttail)) return f (...) in constant stack: cycles deeper
+   than an 8 MiB stack holds as calls, in the generator (a jump) and in the
+   interpreter (the callee replaces the caller's activation), directly and
+   through a function pointer. */
 #include <stdio.h>
 
 #ifdef __MIRC_MUSTTAIL__
@@ -9,7 +10,7 @@
 #define MT
 #endif
 
-#define DEPTH 20000000
+#define DEPTH 2000000
 
 static long odd (long n, long acc);
 static long even (long n, long acc) {
