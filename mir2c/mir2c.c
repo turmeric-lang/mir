@@ -346,7 +346,8 @@ static void out_insn (MIR_context_t ctx, FILE *f, MIR_insn_t insn) {
     fprintf (f, ");\n");
     break;
   case MIR_CALL:
-  case MIR_INLINE: {
+  case MIR_INLINE:
+  case MIR_TCALL: {
     MIR_proto_t proto;
     size_t start = 2;
 
@@ -356,6 +357,9 @@ static void out_insn (MIR_context_t ctx, FILE *f, MIR_insn_t insn) {
     if (proto->nres > 1) {
       (*MIR_get_error_func (ctx)) (MIR_call_op_error,
                                    " can not translate multiple results functions into C");
+    } else if (insn->code == MIR_TCALL) { /* return the call's result (if any) */
+      fprintf (f, "return ");
+      start = 2 + proto->nres;
     } else if (proto->nres == 1) {
       out_op (ctx, f, ops[2]);
       fprintf (f, " = ");

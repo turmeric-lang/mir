@@ -264,7 +264,8 @@
     * Number of operands and their types should be what is expected by the insn being created
     * You can not use `MIR_new_insn` for the creation of call and ret insns as these insns have a variable number of operands.
       To create such insns you should use `MIR_new_insn_arr` or special functions
-      `MIR_insn_t MIR_new_call_insn (MIR_context_t ctx, size_t nops, ...)` and `MIR_insn_t MIR_new_ret_insn (MIR_context_t ctx, size_t nops, ...)`
+      `MIR_insn_t MIR_new_call_insn (MIR_context_t ctx, size_t nops, ...)`, `MIR_insn_t MIR_new_tcall_insn (MIR_context_t ctx, size_t nops, ...)`,
+      and `MIR_insn_t MIR_new_ret_insn (MIR_context_t ctx, size_t nops, ...)`
     * Long double insns are changed by double ones if long double coincides with double for given target or ABI
   * You can get insn name and number of insn operands through API functions
     `const char *MIR_insn_name (MIR_context_t ctx, MIR_insn_code_t code)` and `size_t MIR_insn_nops (MIR_context_t ctx, MIR_insn_t insn)`
@@ -499,6 +500,26 @@
   * This insn is analogous to `MIR_CALL` but after linking this insn
     will be changed by inlined function body if it is possible
   * Calls of vararg functions are never inlined
+
+### MIR_TCALL insn
+  * The insn has the same operands as `MIR_CALL`: a prototype, a called function address,
+    result operands, and the arguments
+  * It calls the function and returns the call's results from the current function, as
+    `MIR_CALL` followed by `MIR_RET` of the result operands would
+    * The prototype results should be the same as the current function results
+    * The insn ends the control flow like `MIR_RET`: the insn after it is reached only by a jump
+    * It can not be used in a function with `MIR_JRET`
+  * Where it can, the generator reuses the current function's frame for the call: it puts
+    the epilogue before the insn and jumps to the called function, so a chain of tail calls
+    runs in constant stack.  On x86-64 and aarch64 that is every `MIR_TCALL` whose
+    prototype is not vararg and whose arguments and results are all passed in registers
+    (no block or long double ones)
+  * Any other `MIR_TCALL`, every one on the other targets, and every one the
+    interpreter executes is a call followed by a return
+  * A tail call is never inlined, and a function containing one is never inlined either
+  * c2mir generates it for `__attribute__ ((musttail)) return f (...);` when the call's
+    results are exactly what the function returns (macro `__MIRC_MUSTTAIL__` is defined);
+    other `musttail` returns stay a call and a return
 
 ### MIR_JCALL and MIR_JRET insns
   * `MIR_JCALL` calls a function without setting up the return address
