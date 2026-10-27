@@ -11,6 +11,12 @@
 #include "c2mir.h"
 
 static const char *src_ptr;
+/* libc headers: c2mir ships only the compiler-provided ones, so the
+   embedder serves the rest (README "System headers are the embedder's
+   job").  run.sh passes Emscripten's own musl sysroot, read straight off
+   the host disk under -sNODERAWFS, which is what a real consumer parses. */
+static const char *include_dirs[1];
+static size_t include_dirs_num;
 
 static int string_getc (void *data) {
   (void) data;
@@ -40,6 +46,8 @@ static int run (const char *code, const char *entry, int64_t *out) {
   c2mir_init (ctx);
   memset (&ops, 0, sizeof (ops));
   ops.message_file = stderr;
+  ops.include_dirs = include_dirs;
+  ops.include_dirs_num = include_dirs_num;
   src_ptr = code;
 
   if (!c2mir_compile (ctx, &ops, string_getc, NULL, "<test>", NULL)) {
@@ -61,6 +69,13 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_load_external (ctx, "strlen", (void *) strlen);
   MIR_load_external (ctx, "sqrt", (void *) sqrt);
   MIR_load_external (ctx, "abs", (void *) abs);
+  MIR_load_external (ctx, "vsnprintf", (void *) vsnprintf);
+  /* musl's <math.h> defines static inline isless & co. over these; c2mir
+     keeps unused static inline functions, so their imports must resolve even
+     when nothing calls them. */
+  MIR_load_external (ctx, "__fpclassify", (void *) __fpclassify);
+  MIR_load_external (ctx, "__fpclassifyf", (void *) __fpclassifyf);
+  MIR_load_external (ctx, "__fpclassifyl", (void *) __fpclassifyl);
   MIR_link (ctx, MIR_set_interp_interface, NULL);
   MIR_interp (ctx, target, &res, 0);
   *out = res.i;
@@ -82,8 +97,13 @@ static int run (const char *code, const char *entry, int64_t *out) {
     }                                                                           \
   } while (0)
 
-int main (void) {
+int main (int argc, char **argv) {
   int fails = 0;
+
+  if (argc > 1) {
+    include_dirs[0] = argv[1];
+    include_dirs_num = 1;
+  }
 
   CHECK ("pure arithmetic (no FFI)", "int t (void) { int a = 6, b = 7; return a * b; }", "t", 42);
 
@@ -108,10 +128,9 @@ int main (void) {
                           "int t (void) { return printf (\"%d %s %.1f\\n\", 7, \"x\", 2.5); }",
          "t", 8);
 
-  /* Known limitation: mir-interp.c widens every variadic integer to I64
-     before _MIR_get_ff_call sees it, so the original C width is gone and
-     we lay variadic integers out as 4-byte slots.  %lld needs 8. */
-  CHECK ("KNOWN-BROKEN printf %lld", "#include <stdio.h>\n"
+  /* c2mir builds the vararg buffer at the call site, where the argument's
+     real width is still known (README "Variadic calls"). */
+  CHECK ("printf %lld", "#include <stdio.h>\n"
                                      "int t (void) { return printf (\"%lld\\n\", 12345678901ll); }",
          "t", 12);
 
@@ -134,6 +153,57 @@ int main (void) {
   CHECK ("call in a loop", "#include <stdio.h>\n"
                            "int t (void) { int i, n = 0; for (i = 0; i < 3; i++) n += printf (\"i=%d\\n\", i); return n; }",
          "t", 12);
+
+  /* The predefined type macros must agree with clang's on wasm32: musl
+     derives size_t/ptrdiff_t/intptr_t from __PTRDIFF_TYPE__ and typedefs
+     wchar_t and wint_t from __WCHAR_TYPE__/__WINT_TYPE__, and the host
+     functions an interpreted call reaches were compiled by clang. */
+  CHECK ("musl headers parse together",
+         "#include <stddef.h>\n#include <stdint.h>\n#include <stdarg.h>\n"
+         "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+         "#include <wchar.h>\n#include <time.h>\n#include <errno.h>\n"
+         "#include <setjmp.h>\n#include <unistd.h>\n#include <fcntl.h>\n"
+         "#include <pthread.h>\n"
+         "int t (void) { size_t n = strlen (\"abc\"); wchar_t w = L'x'; return (int) n + (w == 'x'); }",
+         "t", 4);
+
+  CHECK ("pointer-sized types are long, as clang's",
+         "#include <stddef.h>\n#include <stdint.h>\n#include <sys/types.h>\n"
+         "int t (void) {\n"
+         "  return _Generic ((ptrdiff_t) 0, long: 1, default: 0)\n"
+         "       + _Generic ((intptr_t) 0, long: 2, default: 0)\n"
+         "       + _Generic ((uintptr_t) 0, unsigned long: 4, default: 0)\n"
+         "       + _Generic ((size_t) 0, unsigned long: 8, default: 0)\n"
+         "       + _Generic ((ssize_t) 0, long: 16, default: 0);\n"
+         "}",
+         "t", 31);
+
+  /* Through pointer types: c2mir applies the integer promotions to a
+     _Generic controlling expression, so (short) 0 would select int. */
+  CHECK ("fast/least and wide-char types match clang's",
+         "#include <stdint.h>\n#include <wchar.h>\n#include <uchar.h>\n"
+         "int t (void) {\n"
+         "  return _Generic ((int_fast16_t *) 0, short *: 1, default: 0)\n"
+         "       + _Generic ((uint_fast16_t *) 0, unsigned short *: 2, default: 0)\n"
+         "       + _Generic ((int_least8_t *) 0, signed char *: 4, default: 0)\n"
+         "       + _Generic ((wchar_t *) 0, int *: 8, default: 0)\n"
+         "       + _Generic ((wint_t *) 0, int *: 16, default: 0)\n"
+         "       + (INT_FAST16_MAX == 32767) * 32 + (sizeof (char32_t) == 4) * 64;\n"
+         "}",
+         "t", 127);
+
+  /* musl's <stdio.h> declares vprintf & co. over __isoc_va_list, which
+     bits/alltypes.h typedefs from __builtin_va_list; c2mir's own <stdarg.h>
+     must give va_list that same type.  (A variadic function defined in
+     interpreted code cannot be called here -- README "Known limitations" --
+     so this checks the types rather than calling vsnprintf.) */
+  CHECK ("va_list from <stdarg.h> is musl's __isoc_va_list",
+         "#include <stdarg.h>\n#include <stdio.h>\n"
+         "int t (void) {\n"
+         "  return _Generic ((va_list *) 0, __isoc_va_list *: 1, default: 0)\n"
+         "       + _Generic (&vsnprintf, int (*) (char *, size_t, const char *, va_list): 2, default: 0);\n"
+         "}",
+         "t", 3);
 
   printf ("\n=== %s ===\n", fails == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   return fails != 0;

@@ -17,12 +17,13 @@ consumer links `mir_static` into its own Emscripten build.
 Consumers must build with:
 
 ```
--sWASM_BIGINT
 -sALLOW_TABLE_GROWTH
 -sEXPORTED_RUNTIME_METHODS=wasmTable,UTF8ToString,addFunction,stackAlloc,stackSave,stackRestore
 ```
 
-`WASM_BIGINT` and `wasmTable`/`UTF8ToString` are required by the foreign-call
+plus `-sWASM_BIGINT` on an older Emscripten (current ones enable it by
+default, and emcc 6 reports the flag as deprecated). BigInt integration and
+`wasmTable`/`UTF8ToString` are required by the foreign-call
 implementation; omitting them shows up as `wasmTable is not defined` at the
 first call out of interpreted code. The rest are for calls back *into*
 interpreted code (see Known limitations); a consumer that never passes an
@@ -93,8 +94,15 @@ are 32-bit too. `long double` is mapped to `double`.
 ./wasm-tests/run.sh
 ```
 
-Covers pure interpretation, variadic and non-variadic libc calls, and
-calls in a loop.
+Needs `emcc`, `em-config` and `node` on `PATH`; CI's `wasm` job runs it on the
+SDK version pinned in `.github/workflows/test.yml`. Covers pure
+interpretation, variadic and non-variadic libc calls, calls in a loop, and
+the type model against Emscripten's own musl headers: the test serves c2mir
+the SDK's `sysroot/include` (read off the host disk with `-sNODERAWFS`, the
+headers a consumer would put in MEMFS) and checks that `size_t`, `ptrdiff_t`,
+`intptr_t`, `wchar_t`, `wint_t`, the fast/least types and `va_list` come out
+as the types clang gives them. It is built with `-sSAFE_HEAP`, which traps a
+read through address 0 that a plain module would silently see as zeroes.
 
 ## Known limitations
 

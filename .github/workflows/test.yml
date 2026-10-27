@@ -71,3 +71,25 @@ jobs:
         cmake -A x64 -DBUILD_TESTING=ON
         cmake --build . --config Release
         ctest --verbose --output-on-failure
+
+  # The wasm32/Emscripten target: interpreter only, foreign calls through the
+  # JS trampoline.  Both turmeric (the browser JIT) and c2mp build on it, and
+  # nothing else here compiles mir-wasm.c or c2mir/wasm32/.  The test parses
+  # Emscripten's own musl headers, so a predefined type macro that disagrees
+  # with clang fails here rather than in a consumer.
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Set up Emscripten
+      uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+      with:
+        # An exact SDK version, the one turmeric's CI pins, so a toolchain
+        # bump is a diff in both repos rather than a red run in one.
+        version: 6.0.10
+    - name: wasm-tests/run.sh
+      run: |
+        emcc --version | head -1
+        node --version
+        sh wasm-tests/run.sh
