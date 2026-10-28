@@ -52,6 +52,45 @@ they were shared a page running one program after another in the same
 module exhausted the pool after a few dozen programs. Exhausting it raises a
 MIR error.
 
+### Exact-signature stubs
+
+The trampoline costs a JS round trip with BigInt conversions on every call
+(about 180 ns against 13 ns for an interpreted loop iteration), and it
+leaves a JS frame on the stack, which Asyncify cannot unwind through. An
+embedder whose interpreted code mostly calls into its own runtime knows that
+runtime's signatures — a few dozen, not `4^nargs` — and can register a C stub
+for each with `MIR_wasm_register_ff_stub` (`mir.h`). The key is the wasm
+signature: the result's type code, then each argument's (`i` i32, `j` i64,
+`f` f32, `d` f64, `v` for no result), with a variadic callee's va buffer as a
+final `i`. The stub reads its arguments from 8-byte slots, does the exact
+`call_indirect`, and writes the result:
+
+```c
+static void stub_jji (void *fn, const void *slots, void *retbuf) {
+  int64_t a0, r; int32_t a1;
+  memcpy (&a0, slots, 8);
+  memcpy (&a1, (const char *) slots + 8, 4);
+  r = ((int64_t (*) (int64_t, int32_t)) fn) (a0, a1);
+  memcpy (retbuf, &r, 8);
+}
+MIR_wasm_register_ff_stub ("jji", stub_jji);
+```
+
+A call whose signature has a stub takes it; any other still trampolines.
+Since the stub's `call_indirect` is checked, a callee whose real type differs
+from what the interpreted code declared traps where the trampoline would
+have coerced the arguments.
+
+## setjmp
+
+Natively the interpreter calls `setjmp` through its address, in `eval`'s own
+frame, so that a `longjmp` lands in the activation that asked. emcc refuses
+any indirect use of `setjmp` (`Indirect use of setjmp is not supported`), so
+here the embedder resolves `setjmp` to any non-NULL stand-in;
+`MIR_load_external` replaces it with a marker, and `eval` calls `setjmp` by
+name. `longjmp`'s address is an ordinary one and goes through the FFI. A tail
+call or jcall of `setjmp`, which has no frame to land in, aborts.
+
 ## Function pointers
 
 A MIR function's address is its *thunk*, handed out when the module is
@@ -134,7 +173,8 @@ pool), and the type model against Emscripten's own musl headers: the test serves
 the SDK's `sysroot/include` (read off the host disk with `-sNODERAWFS`, the
 headers a consumer would put in MEMFS) and checks that `size_t`, `ptrdiff_t`,
 `intptr_t`, `wchar_t`, `wint_t`, the fast/least types and `va_list` come out
-as the types clang gives them. It is built with `-sSAFE_HEAP`, which traps a
+as the types clang gives them; `setjmp` and `longjmp` across interpreted
+activations; and calls through registered exact-signature stubs. It is built with `-sSAFE_HEAP`, which traps a
 read through address 0 that a plain module would silently see as zeroes.
 
 ## Known limitations

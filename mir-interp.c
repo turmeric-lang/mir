@@ -1662,8 +1662,8 @@ common_addr:;
     END_INSN;
   }
   CASE (MIR_LADDR, 2) {
-    void **r = get_aop (bp, ops);
-    *r = code + get_i (ops + 1);
+    int64_t *r = get_iop (bp, ops);
+    *r = (int64_t) (uintptr_t) (code + get_i (ops + 1));
     END_INSN;
   }
 
@@ -1807,9 +1807,9 @@ common_addr:;
     END_INSN;
   }
   CASE (MIR_BSTART, 1) {
-    void **p = get_aop (bp, ops);
+    int64_t *p = get_iop (bp, ops);
 
-    *p = bstart_builtin ();
+    *p = (int64_t) (uintptr_t) bstart_builtin ();
     END_INSN;
   }
   SCASE (MIR_BEND, 1, bend_builtin (*get_aop (bp, ops)));
@@ -1842,8 +1842,11 @@ common_addr:;
   SCASE (IC_LDD, 2, LD (dop, double, double));
   SCASE (IC_LDLD, 2, LD (ldop, long double, long double));
   CASE (IC_MOVP, 2) {
-    void **r = get_aop (bp, ops), *a = get_a (ops + 1);
-    *r = a;
+    /* The whole register: where a pointer is narrower than it (wasm32), storing
+       through void ** would leave the upper half as it was, and c2mir converts
+       a pointer to a 64-bit integer by reading the register as is. */
+    int64_t *r = get_iop (bp, ops);
+    *r = (int64_t) (uintptr_t) get_a (ops + 1);
     END_INSN;
   }
   SCASE (IC_STI8, 2, ST (iop, int64_t, int8_t));
@@ -2050,7 +2053,7 @@ static void call (MIR_context_t ctx, MIR_val_t *bp, MIR_op_t *insn_arg_ops, code
     case MIR_T_F: res->f = res_args[i].f; break;
     case MIR_T_D: res->d = res_args[i].d; break;
     case MIR_T_LD: res->ld = res_args[i].ld; break;
-    case MIR_T_P: res->a = res_args[i].a; break;
+    case MIR_T_P: res->u = (uint64_t) (uintptr_t) res_args[i].a; break;
     default: mir_assert (FALSE);
     }
   }
@@ -2204,7 +2207,7 @@ static void interp (MIR_context_t ctx, MIR_item_t func_item, va_list va, MIR_val
     case MIR_T_D: arg_vals[i].d = va_arg (va, double); break;
     case MIR_T_LD: arg_vals[i].ld = va_arg (va, long double); break;
     case MIR_T_P:
-    case MIR_T_RBLK: arg_vals[i].a = va_arg (va, void *); break;
+    case MIR_T_RBLK: arg_vals[i].u = (uint64_t) (uintptr_t) va_arg (va, void *); break;
     default: mir_assert (MIR_blk_type_p (type)); arg_vals[i].a = alloca (arg_vars[i].size);
 #if defined(__PPC64__) || defined(__aarch64__) || defined(__riscv) || defined(_WIN32)
       va_block_arg_builtin (arg_vals[i].a, &va, arg_vars[i].size, type - MIR_T_BLK);
