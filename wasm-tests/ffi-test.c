@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
+#include <setjmp.h>
 
 #include "mir.h"
 #include "mir-dlist.h"
@@ -51,6 +52,8 @@ static long long host_call_ll (long long (*fn) (long long, long long), long long
   return fn (a, b);
 }
 
+static char setjmp_stand_in;
+
 static int run (const char *code, const char *entry, int64_t *out) {
   MIR_context_t ctx = MIR_init ();
   struct c2mir_options ops;
@@ -93,6 +96,11 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_load_external (ctx, "host_call_i64", (void *) host_call_i64);
   MIR_load_external (ctx, "host_call_d", (void *) host_call_d);
   MIR_load_external (ctx, "host_call_ll", (void *) host_call_ll);
+  /* setjmp's address cannot be taken on wasm (emcc: "Indirect use of setjmp
+     is not supported"), so it resolves to any non-NULL stand-in and the
+     interpreter calls setjmp itself; longjmp's address is an ordinary one. */
+  MIR_load_external (ctx, "setjmp", (void *) &setjmp_stand_in);
+  MIR_load_external (ctx, "longjmp", (void *) longjmp);
   /* musl's <math.h> defines static inline isless & co. over these; c2mir
      keeps unused static inline functions, so their imports must resolve even
      when nothing calls them. */
@@ -267,6 +275,17 @@ int main (int argc, char **argv) {
          "static long long sub (long long a, long long b) { return a - b; }\n"
          "int t (void) { return host_call_ll (sub, 5000000000ll, 4999999958ll) == 42; }",
          "t", 1);
+
+  /* setjmp in interpreted code lands in the frame that called it: longjmp
+     unwinds four interpreted activations (and the JS frames of each call
+     between them) back to it, three times over. */
+  CHECK ("setjmp and longjmp in interpreted code",
+         "#include <setjmp.h>\n"
+         "static jmp_buf jb;\n"
+         "static int hits;\n"
+         "static int depth (int n) { if (n == 0) longjmp (jb, ++hits); return depth (n - 1) + 1; }\n"
+         "int t (void) { int r = setjmp (jb); if (r < 3) depth (4); return r * 10 + hits; }",
+         "t", 33);
 
   /* One module, many contexts, as a page runs program after program.  Each
      context interns its foreign-call signatures and takes a thunk per

@@ -38,6 +38,17 @@ void MIR_set_interp_interface (MIR_context_t ctx, MIR_item_t func_item) {}
 #define alloca _alloca
 #endif
 
+/* A call of setjmp runs in eval's own frame, so that a longjmp lands in the
+   activation that made it.  Natively that is a call through setjmp's address;
+   wasm refuses an indirect setjmp, so there eval calls it by name, and
+   setjmp_addr only marks the import (see MIR_load_external). */
+#if defined(__wasm32__) || defined(__EMSCRIPTEN__)
+#include <setjmp.h>
+#define INTERP_SETJMP(func_addr, buf) setjmp (*(jmp_buf *) (buf))
+#else
+#define INTERP_SETJMP(func_addr, buf) (*(func_addr)) (buf)
+#endif
+
 typedef MIR_val_t *code_t;
 
 typedef struct func_desc {
@@ -1673,7 +1684,7 @@ common_addr:;
       MIR_item_t proto_item = get_a (ops + 3);
       size_t start = proto_item->u.proto->nres + 5;
       bp[-2].a = pc;
-      res = (*func_addr) (*get_aop (bp, ops + start));
+      res = INTERP_SETJMP (func_addr, *get_aop (bp, ops + start));
       ops = pc = bp[-2].a;
       nops = get_i (ops);
       bp[get_i (ops + 5)].i = res;
@@ -1692,7 +1703,7 @@ common_addr:;
       MIR_item_t proto_item = get_a (ops + 3);
       size_t start = proto_item->u.proto->nres + 5;
       bp[-2].a = pc;
-      res = (*func_addr) (*get_aop (bp, ops + start));
+      res = INTERP_SETJMP (func_addr, *get_aop (bp, ops + start));
       ops = pc = bp[-2].a;
       nops = get_i (ops);
       bp[get_i (ops + 5)].i = res;
