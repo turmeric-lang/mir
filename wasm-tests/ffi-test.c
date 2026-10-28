@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
+#include <setjmp.h>
 
 #include "mir.h"
 #include "mir-dlist.h"
@@ -51,6 +52,37 @@ static long long host_call_ll (long long (*fn) (long long, long long), long long
   return fn (a, b);
 }
 
+static char setjmp_stand_in;
+
+/* Exact-signature stubs (MIR_wasm_register_ff_stub): what an embedder
+   generates for its runtime's signatures.  Each counts its calls, so a test
+   can tell the stub ran rather than the JS trampoline. */
+static int direct_calls;
+static void stub_iji (void *fn, const void *slots, void *retbuf) {
+  int64_t a0;
+  int32_t a1, r;
+  memcpy (&a0, slots, 8);
+  memcpy (&a1, (const char *) slots + 8, 4);
+  r = ((int32_t (*) (int64_t, int32_t)) fn) (a0, a1);
+  memcpy (retbuf, &r, 4);
+  direct_calls++;
+}
+static void stub_dd (void *fn, const void *slots, void *retbuf) {
+  double a0, r;
+  memcpy (&a0, slots, 8);
+  r = ((double (*) (double)) fn) (a0);
+  memcpy (retbuf, &r, 8);
+  direct_calls++;
+}
+static void stub_iii (void *fn, const void *slots, void *retbuf) { /* printf: fmt, va buffer */
+  int32_t a0, a1, r;
+  memcpy (&a0, slots, 4);
+  memcpy (&a1, (const char *) slots + 8, 4);
+  r = ((int32_t (*) (int32_t, int32_t)) fn) (a0, a1);
+  memcpy (retbuf, &r, 4);
+  direct_calls++;
+}
+
 static int run (const char *code, const char *entry, int64_t *out) {
   MIR_context_t ctx = MIR_init ();
   struct c2mir_options ops;
@@ -93,6 +125,11 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_load_external (ctx, "host_call_i64", (void *) host_call_i64);
   MIR_load_external (ctx, "host_call_d", (void *) host_call_d);
   MIR_load_external (ctx, "host_call_ll", (void *) host_call_ll);
+  /* setjmp's address cannot be taken on wasm (emcc: "Indirect use of setjmp
+     is not supported"), so it resolves to any non-NULL stand-in and the
+     interpreter calls setjmp itself; longjmp's address is an ordinary one. */
+  MIR_load_external (ctx, "setjmp", (void *) &setjmp_stand_in);
+  MIR_load_external (ctx, "longjmp", (void *) longjmp);
   /* musl's <math.h> defines static inline isless & co. over these; c2mir
      keeps unused static inline functions, so their imports must resolve even
      when nothing calls them. */
@@ -268,6 +305,32 @@ int main (int argc, char **argv) {
          "int t (void) { return host_call_ll (sub, 5000000000ll, 4999999958ll) == 42; }",
          "t", 1);
 
+  /* A pointer is narrower than an interpreter register here.  An address
+     stored into one through void ** left the upper half as it was -- here,
+     the -1s of the frame before, on the same stack -- and c2mir converts a
+     pointer to long long by reading the register whole, so the value came out
+     with garbage high bits (a lookup keyed on a function's address missed). */
+  CHECK ("an address converted to long long has no stale high bits",
+         "static int g (void) { return 0; }\n"
+         "static long long fill (void) { volatile long long a = -1, b = -1, c = -1, d = -1, e = -1,"
+         " f = -1, h = -1, i = -1; return a & b & c & d & e & f & h & i; }\n"
+         "static long long addr (void) { return (long long) g; }\n"
+         "static long long addr_of_label (void) { long long x = (long long) &fill; return x; }\n"
+         "int t (void) { int n = 0; fill (); n += (int) (addr () >> 32) != 0;\n"
+         "  fill (); n += (int) (addr_of_label () >> 32) != 0; return n; }",
+         "t", 0);
+
+  /* setjmp in interpreted code lands in the frame that called it: longjmp
+     unwinds four interpreted activations (and the JS frames of each call
+     between them) back to it, three times over. */
+  CHECK ("setjmp and longjmp in interpreted code",
+         "#include <setjmp.h>\n"
+         "static jmp_buf jb;\n"
+         "static int hits;\n"
+         "static int depth (int n) { if (n == 0) longjmp (jb, ++hits); return depth (n - 1) + 1; }\n"
+         "int t (void) { int r = setjmp (jb); if (r < 3) depth (4); return r * 10 + hits; }",
+         "t", 33);
+
   /* One module, many contexts, as a page runs program after program.  Each
      context interns its foreign-call signatures and takes a thunk per
      function; before both were reclaimed, the 100-signature pool ran out
@@ -298,6 +361,36 @@ int main (int argc, char **argv) {
     } else {
       printf ("  ok (250 runs)\n");
     }
+  }
+
+  /* Last, since a registration lasts for the module's life.  The same calls
+     as above, now through the registered stubs: the results must not change,
+     and the stubs must be what ran. */
+  if (!MIR_wasm_register_ff_stub ("iji", stub_iji) || !MIR_wasm_register_ff_stub ("dd", stub_dd)
+      || !MIR_wasm_register_ff_stub ("iii", stub_iii)) {
+    printf ("--- registering stubs ---\n  FAIL\n");
+    fails++;
+  }
+  CHECK ("an i64 argument through a registered stub",
+         "#include <stdint.h>\n"
+         "int host_call_i64 (long long, int);\n"
+         "static int triple (int x) { return 3 * x; }\n"
+         "int t (void) { return host_call_i64 ((long long) (intptr_t) triple, 14); }",
+         "t", 42);
+  CHECK ("a double through a registered stub",
+         "#include <math.h>\n"
+         "int t (void) { return (int) (sqrt (2.25) * 100); }",
+         "t", 150);
+  CHECK ("a variadic call through a registered stub",
+         "#include <stdio.h>\n"
+         "int t (void) { return printf (\"%d-%d\\n\", 4, 2); }",
+         "t", 4);
+  printf ("--- the registered stubs ran ---\n");
+  if (direct_calls != 3) {
+    printf ("  FAIL: %d direct calls, want 3\n", direct_calls);
+    fails++;
+  } else {
+    printf ("  ok (3 direct calls)\n");
   }
 
   printf ("\n=== %s ===\n", fails == 0 ? "ALL PASSED" : "FAILURES PRESENT");
