@@ -35,6 +35,22 @@ static void __attribute__ ((noreturn)) err (MIR_error_type_t t, const char *fmt,
   exit (1);
 }
 
+/* Native code that calls interpreted functions through pointers it was
+   handed: each is a genuine call_indirect, which a thunk address only
+   survives if it is a real wasm table entry.  host_slot hands interpreted
+   code the address of a callback slot it then writes itself, as a runtime's
+   struct field is filled in, so the pointer never crosses a call;
+   host_call_i64 receives it as a 64-bit integer, as a language that passes
+   function values in an int64_t does. */
+static int (*stored_fn) (int);
+static int (**host_slot (void)) (int) { return &stored_fn; }
+static int host_call_stored (int x) { return stored_fn (x); }
+static int host_call_i64 (long long fp, int x) { return ((int (*) (int)) (intptr_t) fp) (x); }
+static double host_call_d (double (*fn) (double), double x) { return fn (x); }
+static long long host_call_ll (long long (*fn) (long long, long long), long long a, long long b) {
+  return fn (a, b);
+}
+
 static int run (const char *code, const char *entry, int64_t *out) {
   MIR_context_t ctx = MIR_init ();
   struct c2mir_options ops;
@@ -70,6 +86,13 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_load_external (ctx, "sqrt", (void *) sqrt);
   MIR_load_external (ctx, "abs", (void *) abs);
   MIR_load_external (ctx, "vsnprintf", (void *) vsnprintf);
+  MIR_load_external (ctx, "snprintf", (void *) snprintf);
+  MIR_load_external (ctx, "qsort", (void *) qsort);
+  MIR_load_external (ctx, "host_slot", (void *) host_slot);
+  MIR_load_external (ctx, "host_call_stored", (void *) host_call_stored);
+  MIR_load_external (ctx, "host_call_i64", (void *) host_call_i64);
+  MIR_load_external (ctx, "host_call_d", (void *) host_call_d);
+  MIR_load_external (ctx, "host_call_ll", (void *) host_call_ll);
   /* musl's <math.h> defines static inline isless & co. over these; c2mir
      keeps unused static inline functions, so their imports must resolve even
      when nothing calls them. */
@@ -79,6 +102,10 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_link (ctx, MIR_set_interp_interface, NULL);
   MIR_interp (ctx, target, &res, 0);
   *out = res.i;
+  /* Finished, so a context's thunks and table entries are released: an
+     embedder like a web page runs program after program in one module. */
+  c2mir_finish (ctx);
+  MIR_finish (ctx);
   return 1;
 }
 
@@ -204,6 +231,74 @@ int main (int argc, char **argv) {
          "       + _Generic (&vsnprintf, int (*) (char *, size_t, const char *, va_list): 2, default: 0);\n"
          "}",
          "t", 3);
+
+  /* An interpreted function's address handed to native code.  qsort gets it
+     as an argument, which worked before; the next two find it in memory or
+     receive it as a long long, which trapped with "table index is out of
+     bounds". */
+  CHECK ("qsort with an interpreted comparator",
+         "#include <stdlib.h>\n"
+         "static int cmp (const void *a, const void *b) { return *(const int *) a - *(const int *) b; }\n"
+         "int t (void) { int v[5] = {5, 3, 4, 1, 2}; qsort (v, 5, sizeof (int), cmp);\n"
+         "  return v[0] * 10000 + v[1] * 1000 + v[2] * 100 + v[3] * 10 + v[4]; }",
+         "t", 12345);
+
+  CHECK ("native code calls a function pointer stored in its memory",
+         "int (**host_slot (void)) (int); int host_call_stored (int);\n"
+         "static int sq (int x) { return x * x; }\n"
+         "int t (void) { *host_slot () = sq; return host_call_stored (7); }",
+         "t", 49);
+
+  CHECK ("native code calls a function pointer passed as long long",
+         "#include <stdint.h>\n"
+         "int host_call_i64 (long long, int);\n"
+         "static int triple (int x) { return 3 * x; }\n"
+         "int t (void) { return host_call_i64 ((long long) (intptr_t) triple, 14); }",
+         "t", 42);
+
+  CHECK ("a double through the table entry",
+         "double host_call_d (double (*) (double), double);\n"
+         "static double half (double x) { return x / 2; }\n"
+         "int t (void) { return (int) (host_call_d (half, 7.1) * 100 + 0.5); }",
+         "t", 355);
+
+  CHECK ("long long arguments and result through the table entry",
+         "long long host_call_ll (long long (*) (long long, long long), long long, long long);\n"
+         "static long long sub (long long a, long long b) { return a - b; }\n"
+         "int t (void) { return host_call_ll (sub, 5000000000ll, 4999999958ll) == 42; }",
+         "t", 1);
+
+  /* One module, many contexts, as a page runs program after program.  Each
+     context interns its foreign-call signatures and takes a thunk per
+     function; before both were reclaimed, the 100-signature pool ran out
+     after 50 of these runs and the 8192 thunks after about 200.  The libc
+     calls are declared rather than included, which keeps 250 compiles
+     quick under -O0 and SAFE_HEAP. */
+  {
+    static char prog[8192];
+    int i, n = 0, bad = 0;
+    int64_t r = 0;
+
+    n += snprintf (prog + n, sizeof prog - n,
+                   "int snprintf (char *, unsigned long, const char *, ...);\n"
+                   "unsigned long strlen (const char *);\n"
+                   "static int f0 (int x) { return x + 1; }\n");
+    for (i = 1; i < 40; i++)
+      n += snprintf (prog + n, sizeof prog - n, "static int f%d (int x) { return f%d (x) + 1; }\n",
+                     i, i - 1);
+    snprintf (prog + n, sizeof prog - n,
+              "int t (void) { char b[16]; snprintf (b, sizeof b, \"%%d\", f39 (0));"
+              " return (int) strlen (b) + f39 (0); }");
+    printf ("--- 250 contexts in one module ---\n");
+    for (i = 0; i < 250 && !bad; i++)
+      if (!run (prog, "t", &r) || r != 42) bad = 1;
+    if (bad) {
+      printf ("  FAIL at run %d (got %lld want 42)\n", i, (long long) r);
+      fails++;
+    } else {
+      printf ("  ok (250 runs)\n");
+    }
+  }
 
   printf ("\n=== %s ===\n", fails == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   return fails != 0;

@@ -18,16 +18,16 @@ Consumers must build with:
 
 ```
 -sALLOW_TABLE_GROWTH
--sEXPORTED_RUNTIME_METHODS=wasmTable,UTF8ToString,addFunction,stackAlloc,stackSave,stackRestore
 ```
 
 plus `-sWASM_BIGINT` on an older Emscripten (current ones enable it by
-default, and emcc 6 reports the flag as deprecated). BigInt integration and
-`wasmTable`/`UTF8ToString` are required by the foreign-call
-implementation; omitting them shows up as `wasmTable is not defined` at the
-first call out of interpreted code. The rest are for calls back *into*
-interpreted code (see Known limitations); a consumer that never passes an
-interpreted function pointer to native code can leave them out.
+default, and emcc 6 reports the flag as deprecated). Every function MIR
+loads takes an entry in the wasm table (see "Function pointers" below), so
+without table growth the first `MIR_load_module` fails with `failed to grow
+table`. The JavaScript runtime pieces `mir-wasm.c` uses (`wasmTable`,
+`UTF8ToString`, `stackSave`/`stackAlloc`/`stackRestore`) are declared with
+`EM_JS_DEPS`, so a consumer no longer exports them; `run.sh` builds with no
+`EXPORTED_RUNTIME_METHODS` at all to keep that true.
 
 ## How foreign calls work
 
@@ -46,8 +46,38 @@ JS-callable function; JS can spread an argument list of arbitrary length
 and type. `_MIR_get_ff_call` records the signature in a slot and returns
 one of 100 pre-generated stubs bound to that slot index (the returned
 pointer must be a plain `void (*) (void *, void *)`, so the signature has
-to be baked into it). MIR interns one interface per distinct signature, so
-100 slots is ample; exhausting the pool raises a MIR error.
+to be baked into it). The slots are interned by signature across contexts:
+each context asks again for the signatures it calls through, and before
+they were shared a page running one program after another in the same
+module exhausted the pool after a few dozen programs. Exhausting it raises a
+MIR error.
+
+## Function pointers
+
+A MIR function's address is its *thunk*, handed out when the module is
+loaded and redirected when it is linked. Here a thunk is an entry in the
+wasm function table: `_MIR_get_thunk` grows the table by one null entry and
+returns its index, and `_MIR_redirect_thunk` fills it -- with a copy of a
+native function's entry, or, for an interpreted function, with a small wasm
+function that trampolines through JavaScript into `MIR_interp_arr`. So an
+interpreted function's address is an ordinary wasm function pointer.
+Interpreted code that calls it still skips the table: `wasm_ff_dispatch`
+recognises a thunk index and re-enters the interpreter directly. Native code
+does a genuine `call_indirect` and lands in the trampoline, however the
+address reached it: as an argument (`qsort`'s comparator), stored in memory
+by interpreted code (a callback field), or passed as a 64-bit integer.
+
+A table entry has to be a wasm function, so the JS trampoline is wrapped in
+a one-import module exporting it at the function's signature -- what
+Emscripten's `addFunction` does -- with the compiled module cached per
+signature and only instantiated per function. Every function a program
+defines gets one at link time.
+
+`MIR_finish` releases a context's thunks (`wasm_context_finish`, from
+`code_finish`): their entries go back to null and the next context reuses
+them, so the table and the 8192-thunk pool stay bounded across programs. A
+native caller still holding a pointer into a finished context traps on a
+null entry rather than running freed code.
 
 Variadic calls use Emscripten's ABI, where `f(fixed..., ...)` lowers to
 `f(fixed..., void *vararg_buffer)`. c2mir's wasm32 target builds that buffer
@@ -96,8 +126,11 @@ are 32-bit too. `long double` is mapped to `double`.
 
 Needs `emcc`, `em-config` and `node` on `PATH`; CI's `wasm` job runs it on the
 SDK version pinned in `.github/workflows/test.yml`. Covers pure
-interpretation, variadic and non-variadic libc calls, calls in a loop, and
-the type model against Emscripten's own musl headers: the test serves c2mir
+interpretation, variadic and non-variadic libc calls, calls in a loop,
+native code calling interpreted functions (through an argument, through
+memory, as a `long long`, with `double` and `long long` signatures), 250
+contexts in one module (past both the old signature pool and the thunk
+pool), and the type model against Emscripten's own musl headers: the test serves c2mir
 the SDK's `sysroot/include` (read off the host disk with `-sNODERAWFS`, the
 headers a consumer would put in MEMFS) and checks that `size_t`, `ptrdiff_t`,
 `intptr_t`, `wchar_t`, `wint_t`, the fast/least types and `va_list` come out
@@ -115,20 +148,14 @@ read through address 0 that a plain module would silently see as zeroes.
   `va_start` still expects the interpreter's own channel. Raises an explicit
   error rather than returning garbage. Passing a struct by value in a variadic
   tail is diagnosed for the same reason.
-- Native code *can* now call back into interpreted functions: when an
-  interpreted function's address is about to be handed to a native callee,
-  `wasm_ff_dispatch` swaps in a real wasm table entry created with
-  Emscripten's `addFunction`. `qsort` and `bsearch` with an interpreted
-  comparator work, including a comparator that itself calls interpreted or
-  native code. Requires `-sALLOW_TABLE_GROWTH` and the `addFunction`,
-  `stackAlloc`, `stackSave` and `stackRestore` runtime methods.
+- **Native code cannot call an interpreted function that is variadic,
+  returns more than one value, or takes more than 32 arguments.** Its table
+  entry stays null (a native call traps), though interpreted code calls it
+  normally.
 
-  Two things to know if you touch that code. `sizeof (MIR_val_t)` is **16**
-  here, not 8 — the union carries a host `long double` and Emscripten's is
-  128-bit — so the marshalling buffer's stride has to come from `sizeof`
-  rather than being assumed. And wasm32 is ILP32, so a function pointer and
-  an `int` are the same wasm type; the substitution therefore triggers on any
-  i32 argument that happens to be a live, slot-aligned interpreted thunk
-  address, which is vanishingly unlikely but not impossible.
+  If you touch the trampoline: `sizeof (MIR_val_t)` is **16** here, not 8 —
+  the union carries a host `long double` and Emscripten's is 128-bit — so the
+  marshalling buffer's stride has to come from `sizeof` rather than being
+  assumed.
 - `long double` precision is that of `double`, so `%Lf` is not usable.
 - Multiple return values are rejected.

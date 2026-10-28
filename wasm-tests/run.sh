@@ -12,7 +12,6 @@ cd "$(dirname "$0")/.."
 SYSINC="$(em-config CACHE)/sysroot/include"
 emcc -O0 -I. -Ic2mir wasm-tests/ffi-test.c mir.c c2mir/c2mir.c \
      -o wasm-tests/ffi-test.js \
-     -sNODERAWFS=1 -sSAFE_HEAP=1 \
-     -sEXPORTED_RUNTIME_METHODS=wasmTable,UTF8ToString \
+     -sNODERAWFS=1 -sSAFE_HEAP=1 -sALLOW_TABLE_GROWTH=1 \
      -sTOTAL_MEMORY=256mb -sSTACK_SIZE=8mb
 node wasm-tests/ffi-test.js "$SYSINC"
