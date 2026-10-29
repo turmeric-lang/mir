@@ -1,0 +1,10 @@
+x 3: c3 a9 00
+u8x 3: c3 a9 00
+oct 3: c3 a9 00
+u8oct 3: c3 a9 00
+src 3: c3 a9 00
+u8src 3: c3 a9 00
+ucn 3: c3 a9 00
+u8ucn 3: c3 a9 00
+ucn3 4: e2 82 ac 00
+u8ucn4 5: f0 9f 98 80 00
