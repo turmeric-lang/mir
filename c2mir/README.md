@@ -104,6 +104,10 @@
     compilers for macro manipulations on the command line
   * Option `-I` to add include directory is analogous to other C-compilers
   * Option `-fpreprocessed` means skipping preprocessor for C files
+  * Option `-fdump-defines` with `-E` ends the output with the `#pragma pack` state and every
+    macro still defined, as directives.  The output then reads back as its input did, also when
+    more code follows it: `[a.c -E -fdump-defines output][b.c]` compiles as `[a.c][b.c]` does, so
+    a common first part of many translation units can be preprocessed once
   * Option `-fsyntax-only` means stopping after parsing and semantic
     checking of C files without MIR code generation
   * Option `-w` means switching off reporting all warnings
@@ -155,4 +159,5 @@
       `-fsyntax-only`, `-pedantic`, `-S`, and `-c` of `c2m`.  If all values of `prepro_only_p`,
       `syntax_only_p`, `asm_p`, and `object_p are zero, there will be no output files, only
       the generated MIR module will be kept in memory of the context `ctx`
+    * Member `prepro_defines_p` with `prepro_only_p` ends the output as option `-fdump-defines` does
     * Member `module_num` defines index in the generated MIR module name (if there is any)

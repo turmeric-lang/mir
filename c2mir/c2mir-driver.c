@@ -305,6 +305,7 @@ static void init_options (int argc, char *argv[]) {
   options.debug_p = options.verbose_p = options.ignore_warnings_p = FALSE;
   options.asm_p = options.object_p = options.no_prepro_p = options.prepro_only_p = FALSE;
   options.syntax_only_p = options.pedantic_p = FALSE;
+  options.prepro_defines_p = FALSE;
   gen_debug_level = -1;
   VARR_CREATE (char, temp_string, &default_alloc, 0);
   VARR_CREATE (char_ptr_t, headers, &default_alloc, 0);
@@ -327,6 +328,8 @@ static void init_options (int argc, char *argv[]) {
       options.verbose_p = TRUE;
     } else if (strcmp (argv[i], "-E") == 0) {
       options.prepro_only_p = TRUE;
+    } else if (strcmp (argv[i], "-fdump-defines") == 0) {
+      options.prepro_defines_p = TRUE;
     } else if (strcmp (argv[i], "-fsyntax-only") == 0) {
       options.syntax_only_p = TRUE;
     } else if (strcmp (argv[i], "-fpreprocessed") == 0) {
@@ -402,6 +405,7 @@ static void init_options (int argc, char *argv[]) {
       fprintf (stderr, "  -v, -d -- output work, parser debug info\n");
       fprintf (stderr, "  -dg[level] -- output given (or max) level MIR-generator debug info\n");
       fprintf (stderr, "  -E -- output C preprocessed code into stdout\n");
+      fprintf (stderr, "  -fdump-defines -- with -E, end the output with the macros still defined\n");
       fprintf (stderr, "  -Dname[=value], -Uname -- predefine or unpredefine macros\n");
       fprintf (stderr, "  -Idir, -Ldir -- add directories to search include headers or lbraries\n");
       fprintf (stderr, "  -fpreprocessed -- assume preprocessed input C\n");
