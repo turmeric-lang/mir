@@ -7,7 +7,8 @@
 #
 #   1. prepro-split/{head,rest}.c, split that way: the same MIR, and it runs
 #      (pack stack, #/##/variadic macros, -D and predefined macros undefined
-#      or redefined, tokens that must not glue, an identifier starting u8);
+#      or redefined, tokens that must not glue, an identifier starting u8,
+#      __func__ only in a skipped #if part);
 #   2. every c-tests/new program that compiles: its -E -fdump-defines output
 #      compiles to the same MIR as the program.
 c2m=$1

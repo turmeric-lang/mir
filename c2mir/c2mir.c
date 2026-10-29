@@ -169,6 +169,7 @@ struct c2m_ctx {
   int (*c_getc) (void *); /* c2mir interface get function */
   void *c_getc_data;
   unsigned n_errors, n_warnings;
+  int func_name_used_p; /* the parser got a __func__ token */
   VARR (char) * symbol_text, *temp_string;
   VARR (token_t) * recorded_tokens, *buffered_tokens;
   node_t top_scope;
@@ -4109,6 +4110,8 @@ static void pre_out (c2m_ctx_t c2m_ctx, token_t t) {
     assert (t->code != T_EOU && t->code != EOF);
     pre_last_token = t;
     if ((t = pptoken2token (c2m_ctx, t, TRUE)) == NULL) return;
+    if (t->code == T_ID && t->repr[0] == '_' && strcmp (t->repr, "__func__") == 0)
+      c2m_ctx->func_name_used_p = TRUE;
   }
   if (t->code == T_STR && VARR_LENGTH (token_t, recorded_tokens) != 0
       && VARR_LAST (token_t, recorded_tokens)->code == T_STR) { /* concat strings */
@@ -8999,7 +9002,13 @@ static void add__func__def (c2m_ctx_t c2m_ctx, node_t func_block, str_t func_nam
   node_t list, declarator, decl, decl_specs;
   tab_str_t str;
 
-  if (!str_exists_p (c2m_ctx, fdecl_name, strlen (fdecl_name) + 1, &str)) return;
+  /* Only when the program says __func__: the spelling is in the string table
+     also when a header merely mentions it, in a #define or a skipped #if
+     part, and a function then got an unused __func__ -- which -E output,
+     having neither, did not. */
+  if (!c2m_ctx->func_name_used_p
+      || !str_exists_p (c2m_ctx, fdecl_name, strlen (fdecl_name) + 1, &str))
+    return;
   decl_specs = new_pos_node (c2m_ctx, N_LIST, pos);
   NL_APPEND (decl_specs->u.ops, new_pos_node (c2m_ctx, N_STATIC, pos));
   NL_APPEND (decl_specs->u.ops, new_pos_node (c2m_ctx, N_CONST, pos));
@@ -16147,6 +16156,7 @@ static void compile_init (c2m_ctx_t c2m_ctx, struct c2mir_options *ops, int (*ge
   MIR_alloc_t alloc = c2m_alloc (c2m_ctx);
   c2m_options = ops;
   n_errors = n_warnings = 0;
+  c2m_ctx->func_name_used_p = FALSE;
   c_getc = getc_func;
   c_getc_data = getc_data;
   VARR_CREATE (char, symbol_text, alloc, 128);

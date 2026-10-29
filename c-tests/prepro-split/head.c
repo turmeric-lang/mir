@@ -32,6 +32,12 @@ struct p2 {
 #undef __STDC_NO_VLA__   /* predefined, and redefined */
 #define __STDC_NO_VLA__ 2
 
+#if 0
+static const char *skipped = __func__; /* lexed and skipped, as in Darwin's
+                                          <assert.h>: no function gets a
+                                          __func__ for it */
+#endif
+
 typedef unsigned char u8; /* an identifier starting with u8 */
 static u8 u8_val = 200;
 static int sum (int a, int b) { return a + b; }
