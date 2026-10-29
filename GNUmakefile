@@ -600,10 +600,14 @@ clean-mir2c-test:
 .PHONY: c2mir-test c2mir-simple-test c2mir-full-test c2mir-interp-test
 .PHONY: c2mir-gen-test c2mir-parallel-gen-test c2mir-gen-test0 c2mir-gen-test1 c2mir-gen-test3
 
-c2mir-test: c2mir-simple-test c2mir-full-test
+c2mir-test: c2mir-simple-test c2mir-prepro-test c2mir-full-test
 
 c2mir-simple-test: $(BUILD_DIR)/c2m$(EXE)
 	$(BUILD_DIR)/c2m$(EXE) -v $(SRC_DIR)/sieve.c -ei
+
+.PHONY: c2mir-prepro-test
+c2mir-prepro-test: $(BUILD_DIR)/c2m$(EXE)
+	$(SHELL) $(SRC_DIR)/c-tests/prepro-split.sh $(BUILD_DIR)/c2m$(EXE)
 
 c2mir-full-test: c2mir-interp-test c2mir-gen-test c2mir-bb-gen-test c2mir-gen-test0 c2mir-gen-test1 c2mir-gen-test3 c2mir-bootstrap
 
