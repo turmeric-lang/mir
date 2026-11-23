@@ -1,5 +1,6 @@
 /* End-to-end check of the wasm32 MIR target: compile C with c2mir, link it
    in interpreter mode, and call it -- including calls out to libc. */
+#include <emscripten/stack.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -51,6 +52,10 @@ static double host_call_d (double (*fn) (double), double x) { return fn (x); }
 static long long host_call_ll (long long (*fn) (long long, long long), long long a, long long b) {
   return fn (a, b);
 }
+
+/* The linear stack pointer, for checking that interpreted code leaves the
+   stack where it found it. */
+static long long sp_now (void) { return (long long) emscripten_stack_get_current (); }
 
 static char setjmp_stand_in;
 
@@ -125,6 +130,7 @@ static int run (const char *code, const char *entry, int64_t *out) {
   MIR_load_external (ctx, "host_call_i64", (void *) host_call_i64);
   MIR_load_external (ctx, "host_call_d", (void *) host_call_d);
   MIR_load_external (ctx, "host_call_ll", (void *) host_call_ll);
+  MIR_load_external (ctx, "sp_now", (void *) sp_now);
   /* setjmp's address cannot be taken on wasm (emcc: "Indirect use of setjmp
      is not supported"), so it resolves to any non-NULL stand-in and the
      interpreter calls setjmp itself; longjmp's address is an ordinary one. */
@@ -217,6 +223,38 @@ int main (int argc, char **argv) {
   CHECK ("call in a loop", "#include <stdio.h>\n"
                            "int t (void) { int i, n = 0; for (i = 0; i < 3; i++) n += printf (\"i=%d\\n\", i); return n; }",
          "t", 12);
+
+  /* A variadic call's buffer is one per function, not an alloca per call:
+     the loop must leave the stack where it was.  At 16 bytes a call, the
+     second run overflowed the 8 MiB stack before it was shared. */
+  CHECK ("variadic call in a loop keeps the stack",
+         "int printf (const char *, ...);\n"
+         "long long sp_now (void);\n"
+         "int t (void) { long long b = sp_now (); for (int i = 0; i < 1000; i++) printf (\"\", i);"
+         " return (int) (b - sp_now ()); }",
+         "t", 0);
+
+  CHECK ("2e6 variadic calls in one function",
+         "int printf (const char *, ...);\n"
+         "long long sp_now (void);\n"
+         "int t (void) { long long b = sp_now (); for (int i = 0; i < 2000000; i++) printf (\"\", i, 1.5);"
+         " return (int) (b - sp_now ()); }",
+         "t", 0);
+
+  /* The shared buffer is sized to the function's largest tail, and a call
+     nested in another's arguments finishes before the outer one fills it. */
+  CHECK ("variadic calls of different sizes, nested",
+         "int snprintf (char *, unsigned long, const char *, ...);\n"
+         "int t (void) {\n"
+         "  char a[32], b[32]; const char *want = \"11|98765432101|2.5|x\";\n"
+         "  int i, r = snprintf (a, sizeof a, \"%d|%lld|%.1f|%s\",\n"
+         "                       snprintf (b, sizeof b, \"%lld\", 12345678901ll), 98765432101ll, 2.5, \"x\");\n"
+         "  for (i = 0; want[i] != 0; i++) if (a[i] != want[i]) return -1;\n"
+         "  if (a[i] != 0) return -2;\n"
+         "  r += snprintf (a, sizeof a, \"%d\", 7);\n"
+         "  return a[0] == '7' && b[10] == '1' ? r : -3;\n"
+         "}",
+         "t", 21);
 
   /* The predefined type macros must agree with clang's on wasm32: musl
      derives size_t/ptrdiff_t/intptr_t from __PTRDIFF_TYPE__ and typedefs
