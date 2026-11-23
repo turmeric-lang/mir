@@ -123,7 +123,11 @@ Variadic calls use Emscripten's ABI, where `f(fixed..., ...)` lowers to
 at the call site and emits a non-variadic call (`VA_BUF_TARGET_P`), because
 that is the last point where each argument's real C type is known —
 `mir-interp.c` derives variadic argument types from an operand's value_mode
-and cannot tell `long long` from `int`. `wasm_ff_dispatch` still has a
+and cannot tell `long long` from `int`. The buffer is one per function, an
+alloca in its prologue sized to the function's largest variadic tail, which
+each call fills from offset 0: an alloca at the call site ran on every
+execution of the call and stayed until the function returned, so a loop
+around `printf` grew the stack 16 bytes an iteration. `wasm_ff_dispatch` still has a
 fallback for any other producer of vararg MIR calls, which lays integers out
 in 4-byte slots and therefore truncates a genuine `long long`.
 
@@ -165,7 +169,8 @@ are 32-bit too. `long double` is mapped to `double`.
 
 Needs `emcc`, `em-config` and `node` on `PATH`; CI's `wasm` job runs it on the
 SDK version pinned in `.github/workflows/test.yml`. Covers pure
-interpretation, variadic and non-variadic libc calls, calls in a loop,
+interpretation, variadic and non-variadic libc calls, calls in a loop
+(two million variadic ones leaving the stack pointer where it was),
 native code calling interpreted functions (through an argument, through
 memory, as a `long long`, with `double` and `long long` signatures), 250
 contexts in one module (past both the old signature pool and the thunk
