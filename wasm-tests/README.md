@@ -91,6 +91,35 @@ here the embedder resolves `setjmp` to any non-NULL stand-in;
 name. `longjmp`'s address is an ordinary one and goes through the FFI. A tail
 call or jcall of `setjmp`, which has no frame to land in, aborts.
 
+## The interpreter's stack
+
+Natively the interpreter's frames and a function's `alloca` blocks are on the
+C stack, and a tail call (or `bend`) releases them by resetting the stack
+pointer. A wasm function cannot reset the stack pointer under its caller:
+LLVM keeps it in a local of the calling function, which writes its own copy
+back at the next `alloca`. So here the interpreter keeps both on a stack of
+its own (`MIR_INTERP_OWN_STACK` in `mir-interp.c`): a list of 256 KiB chunks
+from the context's allocator, with an explicit top that a tail call, `bend`,
+a return and a `longjmp` back into interpreted code all reset. A tail-call
+chain through a function with a local aggregate therefore runs in constant
+space, as it does natively; before, each call left its frame and allocas on
+the linear stack until the chain returned, and a long chain trapped.
+
+Consequences for an embedder:
+
+- A local array of interpreted code is heap memory, not linear-stack memory.
+  Running out raises `MIR_alloc_error` through the context's error function
+  instead of trapping, and the module stays usable.
+- Recursion depth is still bounded by the engine's call stack: every
+  interpreted call nests a wasm frame of `eval`.
+- If the error function leaves the interpreter with a `longjmp` of the
+  embedder's own, or a JS exception unwinds it, the frames that were live
+  stay allocated until `MIR_finish`. Finish the context, as after any error.
+
+`-DMIR_INTERP_OWN_STACK=1` selects the same stack on a native target, which
+is how the c-tests can be run over it (`-DMIR_INTERP_STACK_CHUNK_SIZE=4096`
+makes them cross chunks).
+
 ## Function pointers
 
 A MIR function's address is its *thunk*, handed out when the module is
@@ -179,7 +208,9 @@ the SDK's `sysroot/include` (read off the host disk with `-sNODERAWFS`, the
 headers a consumer would put in MEMFS) and checks that `size_t`, `ptrdiff_t`,
 `intptr_t`, `wchar_t`, `wint_t`, the fast/least types and `va_list` come out
 as the types clang gives them; `setjmp` and `longjmp` across interpreted
-activations; and calls through registered exact-signature stubs. It is built with `-sSAFE_HEAP`, which traps a
+activations; the interpreter's stack (a 100000-call tail-call chain through a
+function with a local aggregate, `bstart`/`bend`, `longjmp`, frames across
+chunks); and calls through registered exact-signature stubs. It is built with `-sSAFE_HEAP`, which traps a
 read through address 0 that a plain module would silently see as zeroes.
 
 ## Known limitations

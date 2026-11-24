@@ -103,7 +103,9 @@ static int run (const char *code, const char *entry, int64_t *out) {
   ops.include_dirs_num = include_dirs_num;
   src_ptr = code;
 
-  if (!c2mir_compile (ctx, &ops, string_getc, NULL, "<test>", NULL)) {
+  if (strncmp (code, "#mir\n", 5) == 0) { /* MIR text, for what c2mir does not generate */
+    MIR_scan_string (ctx, code);
+  } else if (!c2mir_compile (ctx, &ops, string_getc, NULL, "<test>", NULL)) {
     fprintf (stderr, "compile failed\n");
     return 0;
   }
@@ -368,6 +370,68 @@ int main (int argc, char **argv) {
          "static int depth (int n) { if (n == 0) longjmp (jb, ++hits); return depth (n - 1) + 1; }\n"
          "int t (void) { int r = setjmp (jb); if (r < 3) depth (4); return r * 10 + hits; }",
          "t", 33);
+
+  /* The interpreter's frames and allocas are on a stack of its own here,
+     since a wasm function cannot reset the stack pointer under its caller.
+     A tail call drops the caller's: the aggregate of a function in a tail
+     call chain is at one address the whole way, and the linear stack does
+     not move.  Before, each call left about 350 bytes and 100000 of them
+     trapped (STACK_SIZE is 8mb). */
+  CHECK ("a tail call from a function with a local aggregate drops it",
+         "long long sp_now (void);\n"
+         "struct S { long long x[4]; };\n"
+         "static struct S *first; static long long sp0;\n"
+         "static void use (struct S *p) { p->x[1] = p->x[0]; }\n"
+         "static int wb (int n);\n"
+         "static int wa (int n) { struct S s; s.x[0] = n; use (&s);\n"
+         "  if (first == 0) { first = &s; sp0 = sp_now (); }\n"
+         "  if (n == 0) return (first != &s) + 2 * (sp0 != sp_now ());\n"
+         "  __attribute__ ((musttail)) return wb (n - 1); }\n"
+         "static int wb (int n) { __attribute__ ((musttail)) return wa (n); }\n"
+         "int t (void) { return wa (100000); }",
+         "t", 0);
+
+  /* BSTART and BEND, which were a stub and a no-op: an alloca between them
+     is released, so the next round's is at the same address.  (In MIR text:
+     c2mir has no variable length arrays to generate them from.) */
+  CHECK ("bend releases the allocas made since bstart",
+         "#mir\n"
+         "m: module\n"
+         "export t\n"
+         "t: func i64\n"
+         "  local i64:i, i64:sp, i64:a, i64:first, i64:bad\n"
+         "  mov i, 0\n  mov first, 0\n  mov bad, 0\n"
+         "loop:\n"
+         "  bstart sp\n  alloca a, 112\n  mov i8:(a), i\n"
+         "  bne skip, first, 0\n  mov first, a\n"
+         "skip:\n"
+         "  beq same, first, a\n  add bad, bad, 1\n"
+         "same:\n"
+         "  bend sp\n  add i, i, 1\n  blt loop, i, 100000\n"
+         "  ret bad\n"
+         "  endfunc\n"
+         "  endmodule\n",
+         "t", 0);
+
+  /* longjmp restores the C stack; the frames and allocas of the activations
+     it leaves are released too, or every round would start higher. */
+  CHECK ("longjmp releases the frames it leaves",
+         "#include <setjmp.h>\n"
+         "static jmp_buf jb; static char *first; static int bad;\n"
+         "static int deep (int n) { char buf[64]; buf[0] = n;\n"
+         "  if (n == 0) { if (first == 0) first = buf; else if (first != buf) bad++; longjmp (jb, 1); }\n"
+         "  return deep (n - 1) + buf[0]; }\n"
+         "int t (void) { volatile int i = 0; setjmp (jb); if (i++ < 1000) deep (5); return bad; }",
+         "t", 0);
+
+  /* The stack is a list of 256 KiB chunks: 400 frames of 4 KiB cross several,
+     twice, and one array is bigger than a chunk. */
+  CHECK ("frames across the stack's chunks, and an alloca bigger than one",
+         "static int deep (int n) { volatile char buf[4096]; int r; buf[0] = n; buf[4095] = 1;\n"
+         "  r = n == 0 ? 0 : deep (n - 1); return r + (buf[0] == (char) n) + buf[4095] - 1; }\n"
+         "static int big (void) { volatile char b[1000000]; b[0] = 3; b[999999] = 4; return b[0] + b[999999]; }\n"
+         "int t (void) { int a = deep (400), b = big (), c = deep (400); return a + b + c; }",
+         "t", 809);
 
   /* One module, many contexts, as a page runs program after program.  Each
      context interns its foreign-call signatures and takes a thunk per
